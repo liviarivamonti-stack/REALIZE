@@ -2,19 +2,17 @@ import { useState } from "react";
 import {
   useGetCobrancaSummary,
   usePayInstallment,
+  useCreateEvent,
+  useRenovacaoClient,
   getGetCobrancaSummaryQueryKey,
-  getListInstallmentsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-context";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle, CheckCircle2, DollarSign, Users, TrendingDown } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
-import { format } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import {
   Dialog,
   DialogContent,
@@ -22,19 +20,78 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  CheckCircle2,
+  Phone,
+  RefreshCw,
+  Search,
+  AlertTriangle,
+  ShieldAlert,
+  AlertCircle,
+  MessageCircle,
+  TrendingDown,
+  Flame,
+} from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+
+type Filter = "todos" | "critico" | "risco" | "atencao" | "pagos_hoje";
+type CobrancaItem = {
+  id: number;
+  client_id: number;
+  client_nome: string | null;
+  client_telefone: string | null;
+  vendedor_nome: string | null;
+  numero_parcela: number;
+  valor: number;
+  vencimento: string;
+  status: string;
+  pago_em: string | null;
+  dias_atraso: number;
+  risk_level: string | null;
+};
 
 function formatCurrency(v: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 }
 
-function daysOverdue(vencimento: string): number {
-  const today = new Date();
-  const due = new Date(vencimento + "T00:00:00");
-  const diff = Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
-  return Math.max(0, diff);
+function RiskBadge({ level }: { level: string | null }) {
+  if (!level) return null;
+  const cfg = {
+    critico: { label: "Crítico", cls: "bg-red-100 text-red-700 border-red-300 dark:bg-red-900/20 dark:text-red-400", icon: Flame },
+    risco: { label: "Risco", cls: "bg-orange-100 text-orange-700 border-orange-300 dark:bg-orange-900/20 dark:text-orange-400", icon: ShieldAlert },
+    atencao: { label: "Atenção", cls: "bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/20 dark:text-amber-400", icon: AlertTriangle },
+  }[level as "critico" | "risco" | "atencao"];
+  if (!cfg) return null;
+  const Icon = cfg.icon;
+  return (
+    <span className={cn("inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold border", cfg.cls)}>
+      <Icon className="h-2.5 w-2.5" />
+      {cfg.label}
+    </span>
+  );
+}
+
+function FilterPill({ active, onClick, label, count, color }: { active: boolean; onClick: () => void; label: string; count?: number; color?: string }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "px-3 py-1.5 rounded-full text-xs font-medium border transition-all whitespace-nowrap flex items-center gap-1.5",
+        active
+          ? "bg-primary text-primary-foreground border-primary"
+          : "bg-card text-muted-foreground border-border hover:text-foreground"
+      )}
+    >
+      {label}
+      {count !== undefined && count > 0 && (
+        <span className={cn("rounded-full px-1 py-0 text-[10px] font-bold leading-4", active ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground")}>
+          {count}
+        </span>
+      )}
+    </button>
+  );
 }
 
 export default function Cobranca() {
@@ -43,214 +100,346 @@ export default function Cobranca() {
   const queryClient = useQueryClient();
   const { data: summary, isLoading } = useGetCobrancaSummary();
   const payInstallment = usePayInstallment();
+  const createEvent = useCreateEvent();
+  const renovacao = useRenovacaoClient();
 
-  const [selectedInstallment, setSelectedInstallment] = useState<any | null>(null);
+  const [filter, setFilter] = useState<Filter>("todos");
+  const [search, setSearch] = useState("");
+  const [payTarget, setPayTarget] = useState<CobrancaItem | null>(null);
   const [valorPago, setValorPago] = useState("");
+  const [contactTarget, setContactTarget] = useState<CobrancaItem | null>(null);
+  const [contactObs, setContactObs] = useState("");
+  const [renegTarget, setRenegTarget] = useState<CobrancaItem | null>(null);
+  const [renegParcelas, setRenegParcelas] = useState("3");
+  const [renegValor, setRenegValor] = useState("");
+  const [renegDia, setRenegDia] = useState("5");
 
-  const canPay = user?.papel === "cobrador" || user?.papel === "lider";
+  const canAct = user?.papel === "cobrador" || user?.papel === "lider";
 
-  function handlePay(inst: any) {
-    setSelectedInstallment(inst);
-    setValorPago(String(inst.valor));
+  const allItems: CobrancaItem[] = (summary?.items ?? []) as CobrancaItem[];
+
+  const hoje = new Date().toISOString().split("T")[0];
+
+  const filtered = allItems.filter(item => {
+    const matchesSearch =
+      !search ||
+      (item.client_nome?.toLowerCase().includes(search.toLowerCase()) ?? false) ||
+      (item.client_telefone?.includes(search) ?? false);
+
+    const matchesFilter =
+      filter === "todos" ? true
+      : filter === "critico" ? item.risk_level === "critico"
+      : filter === "risco" ? item.risk_level === "risco"
+      : filter === "atencao" ? item.risk_level === "atencao"
+      : filter === "pagos_hoje" ? item.pago_em?.startsWith(hoje) ?? false
+      : true;
+
+    return matchesSearch && matchesFilter;
+  });
+
+  const countByRisk = {
+    critico: allItems.filter(i => i.risk_level === "critico").length,
+    risco: allItems.filter(i => i.risk_level === "risco").length,
+    atencao: allItems.filter(i => i.risk_level === "atencao").length,
+    pagos_hoje: allItems.filter(i => i.pago_em?.startsWith(hoje)).length,
+  };
+
+  function handlePay(item: CobrancaItem) {
+    setPayTarget(item);
+    setValorPago(String(item.valor));
   }
 
   function confirmPayment() {
-    if (!selectedInstallment) return;
+    if (!payTarget) return;
     const amount = parseFloat(valorPago);
-    if (isNaN(amount) || amount <= 0) {
-      toast({ title: "Valor inválido", variant: "destructive" });
-      return;
-    }
-
+    if (isNaN(amount) || amount <= 0) { toast({ title: "Valor inválido", variant: "destructive" }); return; }
     payInstallment.mutate(
-      { id: selectedInstallment.id, data: { valor_pago: amount } },
+      { id: payTarget.id, data: { valor_pago: amount } },
       {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getGetCobrancaSummaryQueryKey() });
-          queryClient.invalidateQueries({ queryKey: getListInstallmentsQueryKey() });
-          toast({ title: "Pagamento registrado!", description: `Parcela de ${formatCurrency(amount)} marcada como paga.` });
-          setSelectedInstallment(null);
+          toast({ title: "Pagamento registrado!", description: `${payTarget.client_nome} — ${formatCurrency(amount)}` });
+          setPayTarget(null);
         },
-        onError: () => {
-          toast({ title: "Erro ao registrar pagamento", variant: "destructive" });
+        onError: () => toast({ title: "Erro ao registrar pagamento", variant: "destructive" }),
+      }
+    );
+  }
+
+  function handleContact(item: CobrancaItem) {
+    setContactTarget(item);
+    setContactObs("");
+  }
+
+  function confirmContact() {
+    if (!contactTarget) return;
+    createEvent.mutate(
+      { data: { client_id: contactTarget.client_id, tipo: "follow_up", observacao: contactObs || `Contato registrado — parcela ${contactTarget.numero_parcela}` } },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getGetCobrancaSummaryQueryKey() });
+          toast({ title: "Contato registrado" });
+          setContactTarget(null);
         },
+        onError: () => toast({ title: "Erro ao registrar contato", variant: "destructive" }),
+      }
+    );
+  }
+
+  function handleReneg(item: CobrancaItem) {
+    setRenegTarget(item);
+    setRenegValor(String(item.valor * 3));
+    setRenegParcelas("3");
+    setRenegDia("5");
+  }
+
+  function confirmReneg() {
+    if (!renegTarget) return;
+    const parcelas = parseInt(renegParcelas);
+    const valor = parseFloat(renegValor);
+    const dia = parseInt(renegDia);
+    if (!parcelas || !valor || !dia) { toast({ title: "Preencha todos os campos", variant: "destructive" }); return; }
+    renovacao.mutate(
+      { id: renegTarget.client_id, data: { novas_parcelas: parcelas, novo_valor: valor, novo_dia_vencimento: dia } },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: getGetCobrancaSummaryQueryKey() });
+          toast({ title: "Renegociação registrada!" });
+          setRenegTarget(null);
+        },
+        onError: () => toast({ title: "Erro na renegociação", variant: "destructive" }),
       }
     );
   }
 
   if (isLoading) {
     return (
-      <div className="p-4 pb-24 space-y-4 pt-6 max-w-lg mx-auto">
-        <Skeleton className="h-8 w-40" />
-        <div className="grid grid-cols-2 gap-4">
-          <Skeleton className="h-24" />
-          <Skeleton className="h-24" />
-        </div>
-        {[1,2,3].map(i => <Skeleton key={i} className="h-28" />)}
+      <div className="p-4 pb-24 space-y-4 pt-4">
+        <div className="flex gap-2"><Skeleton className="h-8 w-20 rounded-full" /><Skeleton className="h-8 w-20 rounded-full" /></div>
+        {[1,2,3,4].map(i => <Skeleton key={i} className="h-16" />)}
       </div>
     );
   }
 
-  const installments = summary?.installments_atrasadas ?? [];
-
   return (
-    <div className="p-4 pb-24 space-y-5 pt-6 max-w-lg mx-auto">
-      <div>
-        <h1 className="text-xl font-bold text-foreground">Cobrança</h1>
-        <p className="text-sm text-muted-foreground">Parcelas em atraso</p>
+    <div className="pb-24 pt-4 max-w-lg mx-auto">
+      {/* Stats header */}
+      <div className="px-4 mb-4">
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-900/10 dark:border-red-900/30 p-2">
+            <div className="text-lg font-bold text-red-600">{summary?.total_criticos ?? 0}</div>
+            <div className="text-[10px] text-red-500 font-medium">Críticos</div>
+          </div>
+          <div className="rounded-xl border border-orange-200 bg-orange-50 dark:bg-orange-900/10 dark:border-orange-900/30 p-2">
+            <div className="text-lg font-bold text-orange-600">{summary?.total_risco ?? 0}</div>
+            <div className="text-[10px] text-orange-500 font-medium">Risco</div>
+          </div>
+          <div className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-900/10 dark:border-amber-900/30 p-2">
+            <div className="text-lg font-bold text-amber-600">{summary?.total_atencao ?? 0}</div>
+            <div className="text-[10px] text-amber-500 font-medium">Atenção</div>
+          </div>
+        </div>
+        <div className="mt-2 text-xs text-muted-foreground text-center">
+          Total: <strong className="text-foreground">{summary?.total_atrasados ?? 0}</strong> parcelas em atraso &mdash; <strong className="text-foreground">{formatCurrency(summary?.valor_total_atrasado ?? 0)}</strong>
+        </div>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-3">
-        <Card className="border-destructive/30 bg-destructive/5">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 text-destructive mb-1">
-              <AlertCircle className="h-4 w-4" />
-              <span className="text-xs font-medium">Em Atraso</span>
-            </div>
-            <div className="text-2xl font-bold text-destructive" data-testid="text-total-atrasados">
-              {summary?.total_atrasados ?? 0}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">parcelas</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 text-amber-500 mb-1">
-              <TrendingDown className="h-4 w-4" />
-              <span className="text-xs font-medium">Valor Total</span>
-            </div>
-            <div className="text-lg font-bold text-foreground" data-testid="text-valor-atrasado">
-              {formatCurrency(summary?.valor_total_atrasado ?? 0)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">a receber</p>
-          </CardContent>
-        </Card>
+      {/* Search */}
+      <div className="px-4 mb-3">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Buscar por nome ou telefone..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
       </div>
 
-      {/* Per-vendedor breakdown */}
-      {(summary?.atrasados_por_vendedor?.length ?? 0) > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Users className="h-4 w-4" />
-              Por Vendedor
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 pt-0">
-            {summary?.atrasados_por_vendedor?.map((v) => (
-              <div key={v.vendedor_id} className="flex items-center justify-between text-sm">
-                <span className="text-foreground font-medium">{v.vendedor_nome}</span>
-                <div className="flex items-center gap-3">
-                  <Badge variant="outline" className="text-destructive border-destructive/30">
-                    {v.total} parcela{v.total !== 1 ? "s" : ""}
-                  </Badge>
-                  <span className="text-muted-foreground">{formatCurrency(v.valor)}</span>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+      {/* Filter pills */}
+      <div className="px-4 mb-3 flex gap-2 overflow-x-auto no-scrollbar pb-1">
+        <FilterPill active={filter === "todos"} onClick={() => setFilter("todos")} label="Todos" count={allItems.length} />
+        <FilterPill active={filter === "critico"} onClick={() => setFilter("critico")} label="Críticos" count={countByRisk.critico} />
+        <FilterPill active={filter === "risco"} onClick={() => setFilter("risco")} label="Risco" count={countByRisk.risco} />
+        <FilterPill active={filter === "atencao"} onClick={() => setFilter("atencao")} label="Atenção" count={countByRisk.atencao} />
+        <FilterPill active={filter === "pagos_hoje"} onClick={() => setFilter("pagos_hoje")} label="Pagos hoje" count={countByRisk.pagos_hoje} />
+      </div>
 
-      {/* Installments list */}
-      <div className="space-y-3">
-        <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-          Parcelas ({installments.length})
-        </h2>
-
-        {installments.length === 0 ? (
-          <Card>
-            <CardContent className="py-12 flex flex-col items-center text-center gap-3">
-              <CheckCircle2 className="h-10 w-10 text-green-500" />
-              <div>
-                <p className="font-semibold text-foreground">Nenhuma parcela em atraso</p>
-                <p className="text-sm text-muted-foreground mt-1">Tudo em dia. Bom trabalho!</p>
-              </div>
-            </CardContent>
-          </Card>
+      {/* List */}
+      <div className="px-4 space-y-1.5">
+        {filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-center gap-3">
+            <CheckCircle2 className="h-10 w-10 text-green-500" />
+            <div>
+              <p className="font-semibold text-foreground">Nenhuma parcela encontrada</p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {search ? "Tente outra busca" : "Tudo em dia neste filtro!"}
+              </p>
+            </div>
+          </div>
         ) : (
-          installments.map((inst) => {
-            const overdueDays = daysOverdue(inst.vencimento);
+          filtered.map(item => {
+            const isPago = item.pago_em != null;
             return (
-              <Card
-                key={inst.id}
-                className={cn("border-l-4", overdueDays > 30 ? "border-l-destructive" : "border-l-amber-400")}
-                data-testid={`card-installment-${inst.id}`}
+              <div
+                key={item.id}
+                className={cn(
+                  "rounded-xl border bg-card p-3 flex flex-col gap-2",
+                  item.risk_level === "critico" && "border-l-4 border-l-red-500",
+                  item.risk_level === "risco" && "border-l-4 border-l-orange-500",
+                  item.risk_level === "atencao" && "border-l-4 border-l-amber-400",
+                  !item.risk_level && "border-l-4 border-l-border",
+                  isPago && "opacity-60"
+                )}
               >
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-foreground truncate">{inst.client_nome}</p>
-                      <p className="text-xs text-muted-foreground">Parcela {inst.numero_parcela}</p>
-                      <div className="flex items-center gap-2 mt-2">
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "text-xs",
-                            overdueDays > 30
-                              ? "text-destructive border-destructive/30 bg-destructive/5"
-                              : "text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-900/10"
-                          )}
-                        >
-                          {overdueDays}d em atraso
-                        </Badge>
-                        <span className="text-xs text-muted-foreground">
-                          Venceu: {format(new Date(inst.vencimento + "T00:00:00"), "dd/MM/yyyy")}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-2 ml-2">
-                      <span className="font-bold text-foreground">{formatCurrency(inst.valor)}</span>
-                      {canPay && (
-                        <Button
-                          size="sm"
-                          onClick={() => handlePay(inst)}
-                          data-testid={`button-pay-${inst.id}`}
-                        >
-                          <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                          Pago
-                        </Button>
-                      )}
-                    </div>
+                {/* Row 1: Name + days + value */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-semibold text-sm text-foreground truncate max-w-[140px]">
+                      {item.client_nome ?? "—"}
+                    </span>
+                    <RiskBadge level={item.risk_level} />
                   </div>
-                </CardContent>
-              </Card>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {item.dias_atraso > 0 && (
+                      <span className="text-xs text-muted-foreground">{item.dias_atraso}d</span>
+                    )}
+                    <span className="font-bold text-sm text-foreground">{formatCurrency(item.valor)}</span>
+                  </div>
+                </div>
+
+                {/* Row 2: Phone + parcela + vencimento */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    {item.client_telefone && (
+                      <a
+                        href={`https://wa.me/55${item.client_telefone.replace(/\D/g, "")}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-green-600 hover:text-green-700 font-medium"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <Phone className="h-3 w-3" />
+                        {item.client_telefone}
+                      </a>
+                    )}
+                    <span>Parc. {item.numero_parcela}</span>
+                    <span>Venc. {format(new Date(item.vencimento + "T00:00:00"), "dd/MM")}</span>
+                  </div>
+                </div>
+
+                {/* Row 3: Actions */}
+                {canAct && !isPago && (
+                  <div className="flex items-center gap-1.5 pt-0.5 border-t border-border">
+                    <Button size="sm" className="h-7 text-xs flex-1 gap-1" onClick={() => handlePay(item)}>
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Pago
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 text-xs flex-1 gap-1" onClick={() => handleContact(item)}>
+                      <MessageCircle className="h-3.5 w-3.5" />
+                      Contato
+                    </Button>
+                    <Button size="sm" variant="outline" className="h-7 text-xs flex-1 gap-1" onClick={() => handleReneg(item)}>
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      Reneg.
+                    </Button>
+                  </div>
+                )}
+                {isPago && (
+                  <p className="text-xs text-green-600 font-medium border-t border-border pt-1.5">
+                    ✓ Pago em {item.pago_em ? format(new Date(item.pago_em), "dd/MM HH:mm") : "—"}
+                  </p>
+                )}
+              </div>
             );
           })
         )}
       </div>
 
       {/* Payment dialog */}
-      <Dialog open={!!selectedInstallment} onOpenChange={(open) => !open && setSelectedInstallment(null)}>
+      <Dialog open={!!payTarget} onOpenChange={open => !open && setPayTarget(null)}>
         <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Registrar Pagamento</DialogTitle>
-          </DialogHeader>
-          {selectedInstallment && (
+          <DialogHeader><DialogTitle>Registrar Pagamento</DialogTitle></DialogHeader>
+          {payTarget && (
             <div className="space-y-4">
               <div className="rounded-lg bg-muted p-3 text-sm space-y-1">
-                <p><span className="text-muted-foreground">Cliente:</span> <strong>{selectedInstallment.client_nome}</strong></p>
-                <p><span className="text-muted-foreground">Parcela:</span> {selectedInstallment.numero_parcela}</p>
-                <p><span className="text-muted-foreground">Vencimento:</span> {format(new Date(selectedInstallment.vencimento + "T00:00:00"), "dd/MM/yyyy")}</p>
+                <p><span className="text-muted-foreground">Cliente:</span> <strong>{payTarget.client_nome}</strong></p>
+                <p><span className="text-muted-foreground">Parcela:</span> {payTarget.numero_parcela}</p>
+                <p><span className="text-muted-foreground">Vencimento:</span> {format(new Date(payTarget.vencimento + "T00:00:00"), "dd/MM/yyyy")}</p>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="valor-pago">Valor recebido (R$)</Label>
+              <div className="space-y-1.5">
+                <Label>Valor recebido (R$)</Label>
+                <Input type="number" value={valorPago} onChange={e => setValorPago(e.target.value)} />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPayTarget(null)}>Cancelar</Button>
+            <Button onClick={confirmPayment} disabled={payInstallment.isPending}>
+              {payInstallment.isPending ? "Registrando..." : "Confirmar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Contact dialog */}
+      <Dialog open={!!contactTarget} onOpenChange={open => !open && setContactTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Registrar Contato</DialogTitle></DialogHeader>
+          {contactTarget && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Registrar contato com <strong className="text-foreground">{contactTarget.client_nome}</strong>
+              </p>
+              <div className="space-y-1.5">
+                <Label>Observação (opcional)</Label>
                 <Input
-                  id="valor-pago"
-                  type="number"
-                  value={valorPago}
-                  onChange={(e) => setValorPago(e.target.value)}
-                  data-testid="input-valor-pago"
+                  placeholder="Ex: Prometeu pagar amanhã..."
+                  value={contactObs}
+                  onChange={e => setContactObs(e.target.value)}
                 />
               </div>
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSelectedInstallment(null)}>Cancelar</Button>
-            <Button onClick={confirmPayment} disabled={payInstallment.isPending} data-testid="button-confirm-payment">
-              {payInstallment.isPending ? "Registrando..." : "Confirmar"}
+            <Button variant="outline" onClick={() => setContactTarget(null)}>Cancelar</Button>
+            <Button onClick={confirmContact} disabled={createEvent.isPending}>
+              {createEvent.isPending ? "Salvando..." : "Registrar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Renegotiation dialog */}
+      <Dialog open={!!renegTarget} onOpenChange={open => !open && setRenegTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Renegociar Dívida</DialogTitle></DialogHeader>
+          {renegTarget && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Renegociar dívida de <strong className="text-foreground">{renegTarget.client_nome}</strong>
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Novas parcelas</Label>
+                  <Input type="number" min="1" value={renegParcelas} onChange={e => setRenegParcelas(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Dia vencimento</Label>
+                  <Input type="number" min="1" max="28" value={renegDia} onChange={e => setRenegDia(e.target.value)} />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Valor total (R$)</Label>
+                <Input type="number" value={renegValor} onChange={e => setRenegValor(e.target.value)} />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenegTarget(null)}>Cancelar</Button>
+            <Button onClick={confirmReneg} disabled={renovacao.isPending}>
+              {renovacao.isPending ? "Salvando..." : "Confirmar"}
             </Button>
           </DialogFooter>
         </DialogContent>

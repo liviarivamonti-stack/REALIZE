@@ -26,6 +26,7 @@ function formatClient(c: any, vendedorNome?: string | null) {
     parcelas: c.parcelas,
     dia_vencimento: c.diaVencimento,
     status: c.status,
+    risk_level: c.riskLevel ?? null,
     createdAt: c.createdAt?.toISOString?.() ?? c.createdAt,
   };
 }
@@ -188,6 +189,43 @@ router.patch("/clients/:id", requireAuth, async (req, res): Promise<void> => {
     res.status(404).json({ error: "Client not found" });
     return;
   }
+
+  const [vendedor] = await db.select().from(usersTable).where(eq(usersTable.id, client.vendedorId));
+  res.json(formatClient(client, vendedor?.nome));
+});
+
+router.patch("/clients/:id/risk-level", requireAuth, async (req, res): Promise<void> => {
+  const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const id = parseInt(raw);
+  if (isNaN(id)) { res.status(400).json({ error: "Invalid ID" }); return; }
+
+  const currentUser = getCurrentUser(req);
+  if (currentUser.papel === "vendedor") { res.status(403).json({ error: "Forbidden" }); return; }
+
+  const riskLevel = req.body?.risk_level;
+  const allowed = [null, "atencao", "risco", "critico"];
+  if (!allowed.includes(riskLevel)) {
+    res.status(400).json({ error: "risk_level must be atencao | risco | critico | null" });
+    return;
+  }
+
+  const [client] = await db
+    .update(clientsTable)
+    .set({ riskLevel: riskLevel ?? null })
+    .where(eq(clientsTable.id, id))
+    .returning();
+
+  if (!client) { res.status(404).json({ error: "Client not found" }); return; }
+
+  await db.insert(clientEventsTable).values({
+    clientId: id,
+    tipo: "anotacao",
+    userId: currentUser.id,
+    observacao: riskLevel
+      ? `Nível de risco alterado para: ${riskLevel}`
+      : "Nível de risco removido",
+    data: new Date(),
+  });
 
   const [vendedor] = await db.select().from(usersTable).where(eq(usersTable.id, client.vendedorId));
   res.json(formatClient(client, vendedor?.nome));

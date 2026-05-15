@@ -28,6 +28,8 @@ tags:
     description: Dashboard summaries and analytics
   - name: ranking
     description: Seller ranking and commissions
+  - name: notifications
+    description: User notifications
 
 paths:
   /healthz:
@@ -249,6 +251,31 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/ClientUpdate"
+      responses:
+        "200":
+          description: Updated client
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Client"
+
+  /clients/{id}/risk-level:
+    patch:
+      operationId: updateClientRiskLevel
+      tags: [clients]
+      summary: Manually set or clear client risk level
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RiskLevelInput"
       responses:
         "200":
           description: Updated client
@@ -697,6 +724,48 @@ paths:
               schema:
                 $ref: "#/components/schemas/CronResult"
 
+  # NOTIFICATIONS
+  /notifications:
+    get:
+      operationId: listNotifications
+      tags: [notifications]
+      summary: List notifications for current user
+      parameters:
+        - name: lida
+          in: query
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of notifications
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Notification"
+
+  /notifications/read-all:
+    post:
+      operationId: markAllNotificationsRead
+      tags: [notifications]
+      summary: Mark all notifications as read
+      responses:
+        "200":
+          description: Marked as read
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [updated]
+                properties:
+                  updated:
+                    type: integer
+
 components:
   schemas:
     HealthStatus:
@@ -791,6 +860,9 @@ components:
         status:
           type: string
           enum: [ativo, em_cobranca, quitado]
+        risk_level:
+          type: ["string", "null"]
+          enum: [atencao, risco, critico, null]
         createdAt:
           type: string
 
@@ -817,6 +889,9 @@ components:
         status:
           type: string
           enum: [ativo, em_cobranca, quitado]
+        risk_level:
+          type: ["string", "null"]
+          enum: [atencao, risco, critico, null]
         createdAt:
           type: string
         installments:
@@ -827,6 +902,14 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ClientEvent"
+
+    RiskLevelInput:
+      type: object
+      required: [risk_level]
+      properties:
+        risk_level:
+          type: ["string", "null"]
+          enum: [atencao, risco, critico, null]
 
     ClientInput:
       type: object
@@ -1054,9 +1137,15 @@ components:
 
     CobrancaSummary:
       type: object
-      required: [total_atrasados, valor_total_atrasado, atrasados_por_vendedor, installments_atrasadas]
+      required: [total_atrasados, total_criticos, total_risco, total_atencao, valor_total_atrasado, atrasados_por_vendedor, items]
       properties:
         total_atrasados:
+          type: integer
+        total_criticos:
+          type: integer
+        total_risco:
+          type: integer
+        total_atencao:
           type: integer
         valor_total_atrasado:
           type: number
@@ -1064,10 +1153,43 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/VendedorCobranca"
-        installments_atrasadas:
+        items:
           type: array
           items:
-            $ref: "#/components/schemas/Installment"
+            $ref: "#/components/schemas/CobrancaItem"
+
+    CobrancaItem:
+      type: object
+      required: [id, client_id, client_nome, client_telefone, numero_parcela, valor, vencimento, status, dias_atraso]
+      properties:
+        id:
+          type: integer
+        client_id:
+          type: integer
+        client_nome:
+          type: ["string", "null"]
+        client_telefone:
+          type: ["string", "null"]
+        vendedor_id:
+          type: ["integer", "null"]
+        vendedor_nome:
+          type: ["string", "null"]
+        numero_parcela:
+          type: integer
+        valor:
+          type: number
+        vencimento:
+          type: string
+        status:
+          type: string
+          enum: [pendente, pago, atrasado]
+        pago_em:
+          type: ["string", "null"]
+        dias_atraso:
+          type: integer
+        risk_level:
+          type: ["string", "null"]
+          enum: [atencao, risco, critico, null]
 
     VendedorCobranca:
       type: object
@@ -1081,6 +1203,31 @@ components:
           type: integer
         valor:
           type: number
+
+    # NOTIFICATIONS
+    Notification:
+      type: object
+      required: [id, user_id, tipo, titulo, mensagem, lida, createdAt]
+      properties:
+        id:
+          type: integer
+        user_id:
+          type: integer
+        tipo:
+          type: string
+          enum: [cobranca_alerta, follow_up, vencimento_proximo, pagamento_confirmado, cliente_critico, atraso_novo, renegociacao, risco_alterado]
+        titulo:
+          type: string
+        mensagem:
+          type: string
+        client_id:
+          type: ["integer", "null"]
+        client_nome:
+          type: ["string", "null"]
+        lida:
+          type: boolean
+        createdAt:
+          type: string
 
     # RANKING
     RankingEntry:

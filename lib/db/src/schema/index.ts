@@ -5,3 +5,4 @@ export * from "./events";
 export * from "./tasks";
 export * from "./private_notes";
 export * from "./sessions";
+export * from "./notifications";

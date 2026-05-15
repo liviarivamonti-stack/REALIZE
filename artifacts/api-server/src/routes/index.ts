@@ -9,6 +9,7 @@ import tasksRouter from "./tasks";
 import notesRouter from "./notes";
 import dashboardRouter from "./dashboard";
 import rankingRouter from "./ranking";
+import notificationsRouter from "./notifications";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(tasksRouter);
 router.use(notesRouter);
 router.use(dashboardRouter);
 router.use(rankingRouter);
+router.use(notificationsRouter);
 
 export default router;

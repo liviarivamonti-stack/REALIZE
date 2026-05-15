@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { db, installmentsTable, clientsTable, clientEventsTable } from "@workspace/db";
-import { eq, and, SQL } from "drizzle-orm";
+import { db, installmentsTable, clientsTable, clientEventsTable, usersTable } from "@workspace/db";
+import { eq, and, SQL, inArray } from "drizzle-orm";
 import { requireAuth, getCurrentUser } from "../lib/auth";
 import {
   ListInstallmentsQueryParams,
@@ -10,6 +10,7 @@ import {
   PayInstallmentParams,
   PayInstallmentBody,
 } from "@workspace/api-zod";
+import { createNotification } from "../lib/notifications";
 
 const router: IRouter = Router();
 
@@ -34,23 +35,14 @@ router.get("/installments", requireAuth, async (req, res): Promise<void> => {
   const currentUser = getCurrentUser(req);
 
   const rows = await db
-    .select({
-      installment: installmentsTable,
-      clientNome: clientsTable.nome,
-      vendedorId: clientsTable.vendedorId,
-    })
+    .select({ installment: installmentsTable, clientNome: clientsTable.nome, vendedorId: clientsTable.vendedorId })
     .from(installmentsTable)
     .leftJoin(clientsTable, eq(installmentsTable.clientId, clientsTable.id))
     .orderBy(installmentsTable.vencimento);
 
   let filtered = rows;
-
-  if (currentUser.papel === "vendedor") {
-    filtered = filtered.filter(r => r.vendedorId === currentUser.id);
-  } else if (vendedor_id) {
-    filtered = filtered.filter(r => r.vendedorId === vendedor_id);
-  }
-
+  if (currentUser.papel === "vendedor") filtered = filtered.filter(r => r.vendedorId === currentUser.id);
+  else if (vendedor_id) filtered = filtered.filter(r => r.vendedorId === vendedor_id);
   if (client_id) filtered = filtered.filter(r => r.installment.clientId === client_id);
   if (status) filtered = filtered.filter(r => r.installment.status === status);
   if (overdue_only) filtered = filtered.filter(r => r.installment.status === "atrasado");
@@ -61,10 +53,7 @@ router.get("/installments", requireAuth, async (req, res): Promise<void> => {
 router.get("/installments/:id", requireAuth, async (req, res): Promise<void> => {
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const params = GetInstallmentParams.safeParse({ id: parseInt(raw) });
-  if (!params.success) {
-    res.status(400).json({ error: "Invalid ID" });
-    return;
-  }
+  if (!params.success) { res.status(400).json({ error: "Invalid ID" }); return; }
 
   const [row] = await db
     .select({ installment: installmentsTable, clientNome: clientsTable.nome, vendedorId: clientsTable.vendedorId })
@@ -72,81 +61,49 @@ router.get("/installments/:id", requireAuth, async (req, res): Promise<void> => 
     .leftJoin(clientsTable, eq(installmentsTable.clientId, clientsTable.id))
     .where(eq(installmentsTable.id, params.data.id));
 
-  if (!row) {
-    res.status(404).json({ error: "Installment not found" });
-    return;
-  }
-
+  if (!row) { res.status(404).json({ error: "Installment not found" }); return; }
   res.json(formatInstallment(row.installment, row.clientNome, row.vendedorId));
 });
 
 router.patch("/installments/:id", requireAuth, async (req, res): Promise<void> => {
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const params = UpdateInstallmentParams.safeParse({ id: parseInt(raw) });
-  if (!params.success) {
-    res.status(400).json({ error: "Invalid ID" });
-    return;
-  }
+  if (!params.success) { res.status(400).json({ error: "Invalid ID" }); return; }
 
   const parsed = UpdateInstallmentBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
   const updates: Record<string, unknown> = {};
   if (parsed.data.status !== undefined) updates.status = parsed.data.status;
   if (parsed.data.valor !== undefined) updates.valor = String(parsed.data.valor);
   if (parsed.data.vencimento !== undefined) updates.vencimento = parsed.data.vencimento;
 
-  const [inst] = await db
-    .update(installmentsTable)
-    .set(updates)
-    .where(eq(installmentsTable.id, params.data.id))
-    .returning();
+  const [inst] = await db.update(installmentsTable).set(updates).where(eq(installmentsTable.id, params.data.id)).returning();
+  if (!inst) { res.status(404).json({ error: "Installment not found" }); return; }
 
-  if (!inst) {
-    res.status(404).json({ error: "Installment not found" });
-    return;
-  }
-
-  const [row] = await db
-    .select({ clientNome: clientsTable.nome, vendedorId: clientsTable.vendedorId })
-    .from(clientsTable)
-    .where(eq(clientsTable.id, inst.clientId));
-
+  const [row] = await db.select({ clientNome: clientsTable.nome, vendedorId: clientsTable.vendedorId }).from(clientsTable).where(eq(clientsTable.id, inst.clientId));
   res.json(formatInstallment(inst, row?.clientNome, row?.vendedorId));
 });
 
 router.post("/installments/:id/pay", requireAuth, async (req, res): Promise<void> => {
   const raw = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const params = PayInstallmentParams.safeParse({ id: parseInt(raw) });
-  if (!params.success) {
-    res.status(400).json({ error: "Invalid ID" });
-    return;
-  }
+  if (!params.success) { res.status(400).json({ error: "Invalid ID" }); return; }
 
   const parsed = PayInstallmentBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
   const currentUser = getCurrentUser(req);
   const now = new Date();
 
-  const [inst] = await db
-    .update(installmentsTable)
-    .set({ status: "pago", pagoEm: now })
-    .where(eq(installmentsTable.id, params.data.id))
-    .returning();
+  const [inst] = await db.update(installmentsTable).set({ status: "pago", pagoEm: now }).where(eq(installmentsTable.id, params.data.id)).returning();
+  if (!inst) { res.status(404).json({ error: "Installment not found" }); return; }
 
-  if (!inst) {
-    res.status(404).json({ error: "Installment not found" });
-    return;
-  }
+  const [clientRow] = await db
+    .select({ clientNome: clientsTable.nome, vendedorId: clientsTable.vendedorId })
+    .from(clientsTable)
+    .where(eq(clientsTable.id, inst.clientId));
 
-  // Create parcela_paga event
   await db.insert(clientEventsTable).values({
     clientId: inst.clientId,
     tipo: "parcela_paga",
@@ -155,12 +112,24 @@ router.post("/installments/:id/pay", requireAuth, async (req, res): Promise<void
     data: now,
   });
 
-  const [row] = await db
-    .select({ clientNome: clientsTable.nome, vendedorId: clientsTable.vendedorId })
-    .from(clientsTable)
-    .where(eq(clientsTable.id, inst.clientId));
+  // Notify all cobradores and lideres
+  const recipients = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(inArray(usersTable.papel, ["cobrador", "lider"]));
 
-  res.json(formatInstallment(inst, row?.clientNome, row?.vendedorId));
+  const valor = parseFloat(inst.valor).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  for (const u of recipients) {
+    await createNotification({
+      userId: u.id,
+      tipo: "pagamento_confirmado",
+      titulo: "Pagamento confirmado",
+      mensagem: `${clientRow?.clientNome ?? "Cliente"} — parcela ${inst.numeroParcela} de ${valor} confirmada.`,
+      clientId: inst.clientId,
+    });
+  }
+
+  res.json(formatInstallment(inst, clientRow?.clientNome, clientRow?.vendedorId));
 });
 
 export default router;

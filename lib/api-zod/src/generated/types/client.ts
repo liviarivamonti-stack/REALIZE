@@ -5,6 +5,7 @@
  * Loan CRM API
  * OpenAPI spec version: 0.1.0
  */
+import type { ClientRiskLevel } from './clientRiskLevel';
 import type { ClientStatus } from './clientStatus';
 
 export interface Client {
@@ -18,5 +19,7 @@ export interface Client {
   parcelas: number;
   dia_vencimento: number;
   status: ClientStatus;
+  /** @nullable */
+  risk_level?: ClientRiskLevel;
   createdAt?: string;
 }

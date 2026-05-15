@@ -129,6 +129,7 @@ export const ListClientsResponseItem = zod.object({
   "parcelas": zod.number(),
   "dia_vencimento": zod.number(),
   "status": zod.enum(['ativo', 'em_cobranca', 'quitado']),
+  "risk_level": zod.union([zod.literal('atencao'),zod.literal('risco'),zod.literal('critico'),zod.literal(null)]).nullish(),
   "createdAt": zod.string().optional()
 })
 export const ListClientsResponse = zod.array(ListClientsResponseItem)
@@ -164,6 +165,7 @@ export const GetClientResponse = zod.object({
   "parcelas": zod.number(),
   "dia_vencimento": zod.number(),
   "status": zod.enum(['ativo', 'em_cobranca', 'quitado']),
+  "risk_level": zod.union([zod.literal('atencao'),zod.literal('risco'),zod.literal('critico'),zod.literal(null)]).nullish(),
   "createdAt": zod.string().optional(),
   "installments": zod.array(zod.object({
   "id": zod.number(),
@@ -213,6 +215,33 @@ export const UpdateClientResponse = zod.object({
   "parcelas": zod.number(),
   "dia_vencimento": zod.number(),
   "status": zod.enum(['ativo', 'em_cobranca', 'quitado']),
+  "risk_level": zod.union([zod.literal('atencao'),zod.literal('risco'),zod.literal('critico'),zod.literal(null)]).nullish(),
+  "createdAt": zod.string().optional()
+})
+
+
+/**
+ * @summary Manually set or clear client risk level
+ */
+export const UpdateClientRiskLevelParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const UpdateClientRiskLevelBody = zod.object({
+  "risk_level": zod.union([zod.literal('atencao'),zod.literal('risco'),zod.literal('critico'),zod.literal(null)]).nullable()
+})
+
+export const UpdateClientRiskLevelResponse = zod.object({
+  "id": zod.number(),
+  "nome": zod.string(),
+  "telefone": zod.string(),
+  "vendedor_id": zod.number(),
+  "vendedor_nome": zod.string().nullish(),
+  "valor_contrato": zod.number(),
+  "parcelas": zod.number(),
+  "dia_vencimento": zod.number(),
+  "status": zod.enum(['ativo', 'em_cobranca', 'quitado']),
+  "risk_level": zod.union([zod.literal('atencao'),zod.literal('risco'),zod.literal('critico'),zod.literal(null)]).nullish(),
   "createdAt": zod.string().optional()
 })
 
@@ -336,6 +365,7 @@ export const RenovacaoClientResponse = zod.object({
   "parcelas": zod.number(),
   "dia_vencimento": zod.number(),
   "status": zod.enum(['ativo', 'em_cobranca', 'quitado']),
+  "risk_level": zod.union([zod.literal('atencao'),zod.literal('risco'),zod.literal('critico'),zod.literal(null)]).nullish(),
   "createdAt": zod.string().optional()
 })
 
@@ -535,6 +565,9 @@ export const GetDashboardSummaryResponse = zod.object({
  */
 export const GetCobrancaSummaryResponse = zod.object({
   "total_atrasados": zod.number(),
+  "total_criticos": zod.number(),
+  "total_risco": zod.number(),
+  "total_atencao": zod.number(),
   "valor_total_atrasado": zod.number(),
   "atrasados_por_vendedor": zod.array(zod.object({
   "vendedor_id": zod.number(),
@@ -542,16 +575,20 @@ export const GetCobrancaSummaryResponse = zod.object({
   "total": zod.number(),
   "valor": zod.number()
 })),
-  "installments_atrasadas": zod.array(zod.object({
+  "items": zod.array(zod.object({
   "id": zod.number(),
   "client_id": zod.number(),
-  "client_nome": zod.string().nullish(),
+  "client_nome": zod.string().nullable(),
+  "client_telefone": zod.string().nullable(),
   "vendedor_id": zod.number().nullish(),
+  "vendedor_nome": zod.string().nullish(),
   "numero_parcela": zod.number(),
   "valor": zod.number(),
   "vencimento": zod.string(),
   "status": zod.enum(['pendente', 'pago', 'atrasado']),
-  "pago_em": zod.string().nullish()
+  "pago_em": zod.string().nullish(),
+  "dias_atraso": zod.number(),
+  "risk_level": zod.union([zod.literal('atencao'),zod.literal('risco'),zod.literal('critico'),zod.literal(null)]).nullish()
 }))
 })
 
@@ -605,6 +642,36 @@ export const ProcessOverdueResponse = zod.object({
   "updated_installments": zod.number(),
   "events_created": zod.number(),
   "tasks_created": zod.number()
+})
+
+
+/**
+ * @summary List notifications for current user
+ */
+export const ListNotificationsQueryParams = zod.object({
+  "lida": zod.coerce.boolean().optional(),
+  "limit": zod.coerce.number().optional()
+})
+
+export const ListNotificationsResponseItem = zod.object({
+  "id": zod.number(),
+  "user_id": zod.number(),
+  "tipo": zod.enum(['cobranca_alerta', 'follow_up', 'vencimento_proximo', 'pagamento_confirmado', 'cliente_critico', 'atraso_novo', 'renegociacao', 'risco_alterado']),
+  "titulo": zod.string(),
+  "mensagem": zod.string(),
+  "client_id": zod.number().nullish(),
+  "client_nome": zod.string().nullish(),
+  "lida": zod.boolean(),
+  "createdAt": zod.string()
+})
+export const ListNotificationsResponse = zod.array(ListNotificationsResponseItem)
+
+
+/**
+ * @summary Mark all notifications as read
+ */
+export const MarkAllNotificationsReadResponse = zod.object({
+  "updated": zod.number()
 })
 
 

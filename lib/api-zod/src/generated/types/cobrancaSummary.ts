@@ -5,12 +5,15 @@
  * Loan CRM API
  * OpenAPI spec version: 0.1.0
  */
-import type { Installment } from './installment';
+import type { CobrancaItem } from './cobrancaItem';
 import type { VendedorCobranca } from './vendedorCobranca';
 
 export interface CobrancaSummary {
   total_atrasados: number;
+  total_criticos: number;
+  total_risco: number;
+  total_atencao: number;
   valor_total_atrasado: number;
   atrasados_por_vendedor: VendedorCobranca[];
-  installments_atrasadas: Installment[];
+  items: CobrancaItem[];
 }

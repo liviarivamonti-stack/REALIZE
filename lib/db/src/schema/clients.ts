@@ -4,6 +4,7 @@ import { z } from "zod/v4";
 import { usersTable } from "./users";
 
 export const clientStatusEnum = pgEnum("client_status", ["ativo", "em_cobranca", "quitado"]);
+export const riskLevelEnum = pgEnum("risk_level", ["atencao", "risco", "critico"]);
 
 export const clientsTable = pgTable("clients", {
   id: serial("id").primaryKey(),
@@ -14,6 +15,7 @@ export const clientsTable = pgTable("clients", {
   parcelas: integer("parcelas").notNull(),
   diaVencimento: integer("dia_vencimento").notNull(),
   status: clientStatusEnum("status").notNull().default("ativo"),
+  riskLevel: riskLevelEnum("risk_level"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

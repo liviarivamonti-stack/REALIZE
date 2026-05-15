@@ -76,6 +76,18 @@ export const ClientStatus = {
   quitado: 'quitado',
 } as const;
 
+/**
+ * @nullable
+ */
+export type ClientRiskLevel = typeof ClientRiskLevel[keyof typeof ClientRiskLevel] | null;
+
+
+export const ClientRiskLevel = {
+  atencao: 'atencao',
+  risco: 'risco',
+  critico: 'critico',
+} as const;
+
 export interface Client {
   id: number;
   nome: string;
@@ -87,6 +99,8 @@ export interface Client {
   parcelas: number;
   dia_vencimento: number;
   status: ClientStatus;
+  /** @nullable */
+  risk_level?: ClientRiskLevel;
   createdAt?: string;
 }
 
@@ -97,6 +111,18 @@ export const ClientDetailStatus = {
   ativo: 'ativo',
   em_cobranca: 'em_cobranca',
   quitado: 'quitado',
+} as const;
+
+/**
+ * @nullable
+ */
+export type ClientDetailRiskLevel = typeof ClientDetailRiskLevel[keyof typeof ClientDetailRiskLevel] | null;
+
+
+export const ClientDetailRiskLevel = {
+  atencao: 'atencao',
+  risco: 'risco',
+  critico: 'critico',
 } as const;
 
 export type InstallmentStatus = typeof InstallmentStatus[keyof typeof InstallmentStatus];
@@ -160,9 +186,28 @@ export interface ClientDetail {
   parcelas: number;
   dia_vencimento: number;
   status: ClientDetailStatus;
+  /** @nullable */
+  risk_level?: ClientDetailRiskLevel;
   createdAt?: string;
   installments: Installment[];
   events: ClientEvent[];
+}
+
+/**
+ * @nullable
+ */
+export type RiskLevelInputRiskLevel = typeof RiskLevelInputRiskLevel[keyof typeof RiskLevelInputRiskLevel] | null;
+
+
+export const RiskLevelInputRiskLevel = {
+  atencao: 'atencao',
+  risco: 'risco',
+  critico: 'critico',
+} as const;
+
+export interface RiskLevelInput {
+  /** @nullable */
+  risk_level: RiskLevelInputRiskLevel;
 }
 
 export interface ClientInput {
@@ -324,11 +369,85 @@ export interface VendedorCobranca {
   valor: number;
 }
 
+export type CobrancaItemStatus = typeof CobrancaItemStatus[keyof typeof CobrancaItemStatus];
+
+
+export const CobrancaItemStatus = {
+  pendente: 'pendente',
+  pago: 'pago',
+  atrasado: 'atrasado',
+} as const;
+
+/**
+ * @nullable
+ */
+export type CobrancaItemRiskLevel = typeof CobrancaItemRiskLevel[keyof typeof CobrancaItemRiskLevel] | null;
+
+
+export const CobrancaItemRiskLevel = {
+  atencao: 'atencao',
+  risco: 'risco',
+  critico: 'critico',
+} as const;
+
+export interface CobrancaItem {
+  id: number;
+  client_id: number;
+  /** @nullable */
+  client_nome: string | null;
+  /** @nullable */
+  client_telefone: string | null;
+  /** @nullable */
+  vendedor_id?: number | null;
+  /** @nullable */
+  vendedor_nome?: string | null;
+  numero_parcela: number;
+  valor: number;
+  vencimento: string;
+  status: CobrancaItemStatus;
+  /** @nullable */
+  pago_em?: string | null;
+  dias_atraso: number;
+  /** @nullable */
+  risk_level?: CobrancaItemRiskLevel;
+}
+
 export interface CobrancaSummary {
   total_atrasados: number;
+  total_criticos: number;
+  total_risco: number;
+  total_atencao: number;
   valor_total_atrasado: number;
   atrasados_por_vendedor: VendedorCobranca[];
-  installments_atrasadas: Installment[];
+  items: CobrancaItem[];
+}
+
+export type NotificationTipo = typeof NotificationTipo[keyof typeof NotificationTipo];
+
+
+export const NotificationTipo = {
+  cobranca_alerta: 'cobranca_alerta',
+  follow_up: 'follow_up',
+  vencimento_proximo: 'vencimento_proximo',
+  pagamento_confirmado: 'pagamento_confirmado',
+  cliente_critico: 'cliente_critico',
+  atraso_novo: 'atraso_novo',
+  renegociacao: 'renegociacao',
+  risco_alterado: 'risco_alterado',
+} as const;
+
+export interface Notification {
+  id: number;
+  user_id: number;
+  tipo: NotificationTipo;
+  titulo: string;
+  mensagem: string;
+  /** @nullable */
+  client_id?: number | null;
+  /** @nullable */
+  client_nome?: string | null;
+  lida: boolean;
+  createdAt: string;
 }
 
 export interface RankingEntry {
@@ -433,5 +552,14 @@ ano?: number;
 export type GetMyRankingParams = {
 mes?: number;
 ano?: number;
+};
+
+export type ListNotificationsParams = {
+lida?: boolean;
+limit?: number;
+};
+
+export type MarkAllNotificationsRead200 = {
+  updated: number;
 };
 

@@ -15,6 +15,7 @@ import ClienteDetail from "@/pages/cliente-detail";
 import Cobranca from "@/pages/cobranca";
 import Metas from "@/pages/metas";
 import Perfil from "@/pages/perfil";
+import Notificacoes from "@/pages/notificacoes";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
@@ -98,6 +99,7 @@ function AppRouter() {
               </Route>
 
               <Route path="/perfil" component={Perfil} />
+              <Route path="/notificacoes" component={Notificacoes} />
               <Route component={NotFound} />
             </Switch>
           </Layout>
