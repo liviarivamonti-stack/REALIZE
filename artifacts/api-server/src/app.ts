@@ -1,15 +1,17 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import { pinoHttp } from "pino-http";
+import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import type { IncomingMessage, ServerResponse } from "http";
 
+const pino = (pinoHttp as any).default ?? pinoHttp;
+
 const app: Express = express();
 
 app.use(
-  pinoHttp({
+  pino({
     logger,
     serializers: {
       req(req: IncomingMessage & { id?: string }) {
