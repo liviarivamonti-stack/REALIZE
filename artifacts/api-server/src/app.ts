@@ -1,25 +1,43 @@
-import express, { type Request, type Response } from 'express';
-import cors from 'cors';
-import pinoHttp from 'pino-http';
+import express, { type Express, type Request, type Response } from "express";
+import cors from "cors";
+import cookieParser from "cookie-parser";
+import pinoHttp from "pino-http";
+import router from "./routes";
+import { logger } from "./lib/logger";
 
-const app = express();
-
-app.use(cors());
-app.use(express.json());
+const app: Express = express();
 
 app.use(
   pinoHttp({
-    transport: {
-      target: 'pino-pretty',
+    logger,
+    serializers: {
+      req(req: Request) {
+        return {
+          id: (req as any).id,
+          method: req.method,
+          url: req.url?.split("?")[0],
+        };
+      },
+      res(res: Response) {
+        return {
+          statusCode: res.statusCode,
+        };
+      },
     },
+  }) as any
+);
+
+app.use(
+  cors({
+    origin: true,
+    credentials: true,
   })
 );
 
-app.get('/health', (req: Request, res: Response) => {
-  res.status(200).json({
-    status: 'ok',
-    uptime: process.uptime(),
-  });
-});
+app.use(cookieParser());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+app.use("/api", router);
 
 export default app;
