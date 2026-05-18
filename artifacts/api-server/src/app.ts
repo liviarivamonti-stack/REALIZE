@@ -1,17 +1,18 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import type { IncomingMessage, ServerResponse } from "http";
 
-const pino = (pinoHttp as any).default ?? pinoHttp;
+// 👇 AQUI ESTÁ O SEGREDO
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const pinoHttp = require("pino-http");
 
 const app: Express = express();
 
 app.use(
-  pino({
+  pinoHttp({
     logger,
     serializers: {
       req(req: IncomingMessage & { id?: string }) {
