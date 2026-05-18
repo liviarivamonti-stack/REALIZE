@@ -1,9 +1,11 @@
 import express, { type Express, type Request, type Response } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
-import pinoHttp from "pino-http";
+import * as pinoHttpModule from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+
+const pinoHttp = (pinoHttpModule as any).default ?? pinoHttpModule;
 
 const app: Express = express();
 
