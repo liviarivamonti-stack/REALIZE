@@ -1,6 +1,6 @@
 {
-  "buildCommand": "pnpm install --no-frozen-lockfile && pnpm --filter @workspace/crm build",
+  "buildCommand": "npm install && npm run build --workspace=@workspace/crm",
   "outputDirectory": "artifacts/crm/dist",
-  "installCommand": "pnpm install --no-frozen-lockfile",
+  "installCommand": "npm install --include=dev",
   "framework": "vite"
 }
