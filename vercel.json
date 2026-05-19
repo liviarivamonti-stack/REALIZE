@@ -1,6 +1,6 @@
 {
-  "buildCommand": "pnpm install && pnpm --filter @workspace/crm build",
+  "buildCommand": "pnpm install --no-frozen-lockfile && pnpm --filter @workspace/crm build",
   "outputDirectory": "artifacts/crm/dist",
-  "installCommand": "pnpm install",
+  "installCommand": "pnpm install --no-frozen-lockfile",
   "framework": "vite"
 }
