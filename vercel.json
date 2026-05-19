@@ -1,5 +1,6 @@
 {
-  "buildCommand": "cd artifacts/crm && npm install --legacy-peer-deps && npm run build",
+  "buildCommand": "pnpm install --no-frozen-lockfile && pnpm --filter @workspace/crm build",
   "outputDirectory": "artifacts/crm/dist",
+  "installCommand": "pnpm install --no-frozen-lockfile",
   "framework": "vite"
 }
