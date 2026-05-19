@@ -1,6 +1,5 @@
 {
-  "buildCommand": "npm install && npm run build --workspace=@workspace/crm",
+  "buildCommand": "cd artifacts/crm && npm install && npm run build",
   "outputDirectory": "artifacts/crm/dist",
-  "installCommand": "npm install --include=dev",
   "framework": "vite"
 }
